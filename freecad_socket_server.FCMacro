@@ -1,0 +1,364 @@
+"""
+FreeCAD Socket 服务器
+用于接收和执行 Python 代码的 TCP 服务器
+
+使用方法：
+1. 在 FreeCAD 中：Macro -> Macros -> 选择此文件 -> Execute
+2. 服务器将在端口 9877 监听
+3. 后端可以通过 Socket 发送 JSON 命令
+
+作者：FreeCAD AI 助手项目
+日期：2024年1月
+"""
+
+import socket
+import json
+import threading
+import struct
+import FreeCAD
+import FreeCADGui
+from PySide import QtCore, QtGui
+
+# =====================================================
+# 配置
+# =====================================================
+HOST = '127.0.0.1'
+PORT = 9877
+BUFFER_SIZE = 1024 * 1024  # 1MB 缓冲区
+
+# =====================================================
+# 全局变量
+# =====================================================
+server_socket = None
+server_thread = None
+is_running = False
+client_handlers = []
+
+# =====================================================
+# 命令处理器
+# =====================================================
+
+def execute_code_in_main_thread(code):
+    """
+    在主线程中执行代码（线程安全）
+    """
+    result = {"status": "ok", "output": "", "error": None}
+    
+    try:
+        # 捕获 print 输出
+        import io
+        import sys
+        
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
+        
+        sys.stdout = stdout_buffer
+        sys.stderr = stderr_buffer
+        
+        # 执行代码
+        exec_globals = {
+            'FreeCAD': FreeCAD,
+            'App': FreeCAD,
+            'Gui': FreeCADGui,
+            'Part': __import__('Part'),
+            'Draft': __import__('Draft'),
+            'Mesh': __import__('Mesh'),
+            'Import': __import__('Import'),
+        }
+        
+        exec(code, exec_globals)
+        
+        # 恢复输出
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        
+        # 获取输出
+        stdout_text = stdout_buffer.getvalue()
+        stderr_text = stderr_buffer.getvalue()
+        
+        if stderr_text:
+            result["status"] = "error"
+            result["error"] = stderr_text
+        else:
+            result["status"] = "ok"
+        
+        result["output"] = stdout_text if stdout_text else "执行成功"
+        
+    except Exception as e:
+        import traceback
+        result["status"] = "error"
+        result["error"] = str(e)
+        result["traceback"] = traceback.format_exc()
+    
+    return result
+
+def handle_command(command_data):
+    """
+    处理客户端命令
+    """
+    try:
+        cmd_type = command_data.get("type", "")
+        params = command_data.get("params", {})
+        
+        if cmd_type == "execute_code":
+            # 执行代码
+            code = params.get("code", "")
+            if not code:
+                return {"status": "error", "message": "代码为空"}
+            
+            # 在主线程中执行
+            result = execute_code_in_main_thread(code)
+            return {"status": result["status"], "result": result}
+        
+        elif cmd_type == "get_scene_info":
+            # 获取场景信息
+            doc = FreeCAD.ActiveDocument
+            if doc:
+                objects = [{"name": obj.Name, "label": obj.Label, "type": obj.TypeId} 
+                          for obj in doc.Objects]
+                return {
+                    "status": "ok",
+                    "result": {
+                        "document_name": doc.Name,
+                        "object_count": len(doc.Objects),
+                        "objects": objects
+                    }
+                }
+            else:
+                return {"status": "ok", "result": {"object_count": 0, "objects": []}}
+        
+        elif cmd_type == "ping":
+            # 心跳检测
+            return {"status": "ok", "message": "pong"}
+        
+        else:
+            return {"status": "error", "message": f"未知命令: {cmd_type}"}
+            
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "message": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+# =====================================================
+# Socket 服务器
+# =====================================================
+
+def recv_all(sock, n):
+    """精确接收 n 字节数据"""
+    data = b''
+    while len(data) < n:
+        chunk = sock.recv(n - len(data))
+        if not chunk:
+            return None
+        data += chunk
+    return data
+
+def send_json(sock, data):
+    """发送 JSON 数据（带4字节长度前缀）"""
+    json_bytes = json.dumps(data, ensure_ascii=False).encode('utf-8')
+    # 先发送4字节长度（大端序）
+    sock.sendall(struct.pack('>I', len(json_bytes)))
+    # 再发送数据
+    sock.sendall(json_bytes)
+
+def handle_client(client_socket, client_address):
+    """
+    处理单个客户端连接
+    """
+    print(f"[服务器] 客户端已连接: {client_address}")
+    
+    try:
+        while is_running:
+            # 接收数据长度（4字节）
+            length_bytes = recv_all(client_socket, 4)
+            if not length_bytes:
+                print(f"[服务器] 客户端断开: {client_address}")
+                break
+            
+            data_length = struct.unpack('>I', length_bytes)[0]
+            if data_length > BUFFER_SIZE:
+                print(f"[服务器] 数据过大: {data_length} 字节，拒绝处理")
+                error_response = {"status": "error", "message": "数据过大"}
+                send_json(client_socket, error_response)
+                continue
+            
+            # 接收实际数据
+            data_bytes = recv_all(client_socket, data_length)
+            if not data_bytes:
+                print(f"[服务器] 接收数据失败")
+                break
+            
+            # 解析命令
+            try:
+                command = json.loads(data_bytes.decode('utf-8'))
+                print(f"[服务器] 收到命令: {command.get('type', 'unknown')}")
+                
+                # 处理命令
+                response = handle_command(command)
+                
+                # 发送响应
+                send_json(client_socket, response)
+                print(f"[服务器] 已发送响应")
+                
+            except json.JSONDecodeError as e:
+                error_response = {"status": "error", "message": f"JSON 解析失败: {e}"}
+                send_json(client_socket, error_response)
+            except Exception as e:
+                error_response = {"status": "error", "message": f"处理失败: {e}"}
+                send_json(client_socket, error_response)
+    
+    except Exception as e:
+        print(f"[服务器] 客户端处理错误: {e}")
+    finally:
+        client_socket.close()
+        print(f"[服务器] 客户端已断开: {client_address}")
+
+def server_loop():
+    """
+    服务器主循环
+    """
+    global server_socket, is_running
+    
+    try:
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind((HOST, PORT))
+        server_socket.listen(5)
+        
+        print(f"[服务器] FreeCAD Socket 服务器已启动")
+        print(f"[服务器] 监听地址: {HOST}:{PORT}")
+        
+        while is_running:
+            try:
+                server_socket.settimeout(1.0)  # 1秒超时，便于检查 is_running
+                client_socket, client_address = server_socket.accept()
+                
+                # 为每个客户端创建新线程
+                client_thread = threading.Thread(
+                    target=handle_client,
+                    args=(client_socket, client_address),
+                    daemon=True
+                )
+                client_thread.start()
+                client_handlers.append(client_thread)
+                
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if is_running:
+                    print(f"[服务器] 接受连接错误: {e}")
+    
+    except Exception as e:
+        print(f"[服务器] 启动失败: {e}")
+    finally:
+        if server_socket:
+            server_socket.close()
+        print("[服务器] 服务器已关闭")
+
+# =====================================================
+# 启动/停止函数
+# =====================================================
+
+def start_server():
+    """启动服务器"""
+    global server_thread, is_running
+    
+    if is_running:
+        print("[服务器] 服务器已在运行中")
+        return
+    
+    is_running = True
+    server_thread = threading.Thread(target=server_loop, daemon=True)
+    server_thread.start()
+    
+    # 显示通知
+    msg = f"FreeCAD Socket 服务器已启动\n监听端口: {PORT}"
+    FreeCAD.Console.PrintMessage(msg + "\n")
+    
+    # GUI 通知（如果有 GUI）
+    try:
+        QtGui.QMessageBox.information(
+            FreeCADGui.getMainWindow(),
+            "服务器启动",
+            msg
+        )
+    except:
+        pass
+
+def stop_server():
+    """停止服务器"""
+    global is_running
+    
+    if not is_running:
+        print("[服务器] 服务器未运行")
+        return
+    
+    is_running = False
+    
+    # 等待线程结束
+    if server_thread:
+        server_thread.join(timeout=2.0)
+    
+    msg = "FreeCAD Socket 服务器已停止"
+    FreeCAD.Console.PrintMessage(msg + "\n")
+    
+    try:
+        QtGui.QMessageBox.information(
+            FreeCADGui.getMainWindow(),
+            "服务器停止",
+            msg
+        )
+    except:
+        pass
+
+# =====================================================
+# 主程序
+# =====================================================
+
+if __name__ == "__main__":
+    # 检查是否已在运行
+    if is_running:
+        print("[服务器] 服务器已在运行中，正在停止...")
+        stop_server()
+    else:
+        print("[服务器] 启动 FreeCAD Socket 服务器...")
+        start_server()
+
+# =====================================================
+# 使用说明
+# =====================================================
+"""
+使用方法：
+
+1. 在 FreeCAD 中执行此宏：
+   Macro -> Macros -> 选择 freecad_socket_server.FCMacro -> Execute
+
+2. 服务器将在后台运行，端口 9877
+
+3. 后端通过 Socket 连接：
+   import socket
+   import json
+   
+   sock = socket.socket()
+   sock.connect(('127.0.0.1', 9877))
+   
+   command = {
+       "type": "execute_code",
+       "params": {
+           "code": "import Part; print('Hello')"
+       }
+   }
+   
+   sock.sendall(json.dumps(command).encode())
+   response = sock.recv(1024*1024)
+   print(json.loads(response))
+
+4. 停止服务器：
+   再次执行此宏即可停止
+"""

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 查看器快速测试</title>
+    <style>
+        body {
+            font-family: 'Consolas', monospace;
+            background: #1a1a2e;
+            color: #e2e8f0;
+            padding: 2rem;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test {
+            background: #16213e;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 8px;
+            border-left: 4px solid #ff8c42;
+        }
+        .success {
+            border-left-color: #10b981;
+            color: #10b981;
+        }
+        .error {
+            border-left-color: #ef4444;
+            color: #ef4444;
+        }
+        #canvas {
+            width: 100%;
+            height: 400px;
+            background: #0d1117;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 3D 查看器快速测试</h1>
+    
+    <div class="test" id="lib-test"></div>
+    
+    <h2>第一步：检查库加载</h2>
+    <button onclick="checkLibraries()">检查库</button>
+    
+    <h2>第二步：初始化 3D 查看器</h2>
+    <button onclick="initTest()">初始化</button>
+    <div id="canvas"></div>
+    
+    <h2>第三步：测试 STL 加载</h2>
+    <button onclick="testSTLLoad()">测试 STL 加载</button>
+    
+    <h2>第四步：测试下载</h2>
+    <button onclick="testDownload()">测试下载</button>
+    
+    <div class="test" id="result"></div>
+    
+    <!-- Three.js 库 - r128 版本 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    
+    <script>
+        let testScene, testCamera, testRenderer, testControls, testMesh;
+        let testSTLData = null;
+        
+        function addResult(message, isSuccess) {
+            const div = document.createElement('div');
+            div.className = 'test ' + (isSuccess ? 'success' : 'error');
+            div.textContent = (isSuccess ? '✓ ' : '✗ ') + message;
+            document.getElementById('result').appendChild(div);
+        }
+        
+        function clearResults() {
+            document.getElementById('result').innerHTML = '';
+        }
+        
+        function checkLibraries() {
+            clearResults();
+            
+            // 检查 Three.js
+            if (typeof THREE !== 'undefined') {
+                addResult('Three.js 核心库已加载 (版本: ' + THREE.REVISION + ')', true);
+            } else {
+                addResult('Three.js 核心库未加载', false);
+                return;
+            }
+            
+            // 检查 OrbitControls
+            if (typeof THREE !== 'undefined' && THREE.OrbitControls) {
+                addResult('OrbitControls 已加载', true);
+            } else {
+                addResult('OrbitControls 未加载', false);
+            }
+            
+            // 检查 STLLoader
+            if (typeof THREE !== 'undefined' && THREE.STLLoader) {
+                addResult('STLLoader 已加载', true);
+            } else {
+                addResult('STLLoader 未加载', false);
+            }
+        }
+        
+        function initTest() {
+            clearResults();
+            addResult('开始初始化 3D 查看器...', true);
+            
+            try {
+                // 创建测试场景
+                testScene = new THREE.Scene();
+                testScene.background = new THREE.Color(0x0d1117);
+                
+                const canvasDiv = document.getElementById('canvas');
+                canvasDiv.innerHTML = '<canvas id="testCanvas"></canvas>';
+                
+                const canvas = document.getElementById('testCanvas');
+                canvas.width = canvasDiv.clientWidth;
+                canvas.height = 400;
+                
+                testCamera = new THREE.PerspectiveCamera(75, canvas.width / canvas.height, 0.1, 1000);
+                testCamera.position.set(3, 3, 3);
+                testCamera.lookAt(0, 0, 0);
+                
+                testRenderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+                testRenderer.setSize(canvas.width, canvas.height);
+                
+                // 关键测试：创建 OrbitControls
+                console.log('创建 OrbitControls...');
+                console.log('THREE.OrbitControls:', THREE.OrbitControls);
+                
+                testControls = new THREE.OrbitControls(testCamera, testRenderer.domElement);
+                console.log('testControls 对象:', testControls);
+                console.log('testControls.update 类型:', typeof testControls.update);
+                
+                testControls.enableDamping = true;
+                testControls.dampingFactor = 0.05;
+                
+                addResult('✓ 场景、相机、渲染器创建成功', true);
+                
+                // 测试 controls.update() 是否存在
+                if (typeof testControls.update === 'function') {
+                    addResult('✓ controls.update() 方法可用', true);
+                } else {
+                    addResult('✗ controls.update() 方法不可用', false);
+                    console.error('testControls 对象:', testControls);
+                }
+                
+                // 添加灯光和物体
+                const light = new THREE.DirectionalLight(0xffffff, 1);
+                light.position.set(5, 5, 5);
+                testScene.add(light);
+                
+                const ambient = new THREE.AmbientLight(0x404040);
+                testScene.add(ambient);
+                
+                const geometry = new THREE.BoxGeometry(1, 1, 1);
+                const material = new THREE.MeshPhongMaterial({ color: 0xff8c42 });
+                testMesh = new THREE.Mesh(geometry, material);
+                testScene.add(testMesh);
+                
+                // 渲染循环
+                function animate() {
+                    requestAnimationFrame(animate);
+                    testMesh.rotation.x += 0.01;
+                    testMesh.rotation.y += 0.01;
+                    
+                    if (testControls && typeof testControls.update === 'function') {
+                        testControls.update();
+                    }
+                    
+                    testRenderer.render(testScene, testCamera);
+                }
+                
+                animate();
+                addResult('✓ 3D 查看器初始化完成，立方体正在旋转', true);
+                
+            } catch (error) {
+                addResult('初始化失败: ' + error.message, false);
+                console.error('错误详情:', error);
+            }
+        }
+        
+        function testSTLLoad() {
+            clearResults();
+            addResult('测试 STL 加载...', true);
+            
+            try {
+                // 创建一个简单的三角形 STL（Base64 编码）
+                const testSTL = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAANszMPgAAAAAAAIA/AACAPwAAgD8AAAAAAACAPwAAgD8AAIA/AACAPw==";
+                
+                // 解码
+                const binaryString = atob(testSTL);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                addResult('✓ Base64 解码成功', true);
+                
+                // 加载 STL
+                const loader = new THREE.STLLoader();
+                const geometry = loader.parse(bytes.buffer);
+                
+                addResult('✓ STL 解析成功', true);
+                addResult('  顶点数: ' + geometry.attributes.position.count, true);
+                
+                // 保存数据用于下载测试
+                testSTLData = testSTL;
+                addResult('✓ STL 数据已保存，长度: ' + testSTLData.length + ' 字符', true);
+                
+            } catch (error) {
+                addResult('STL 加载失败: ' + error.message, false);
+                console.error('错误详情:', error);
+            }
+        }
+        
+        function testDownload() {
+            clearResults();
+            addResult('测试下载功能...', true);
+            
+            if (!testSTLData) {
+                addResult('✗ 没有 STL 数据可供下载', false);
+                addResult('提示：请先运行"测试 STL 加载"', true);
+                return;
+            }
+            
+            try {
+                // 解码 Base64
+                const binaryString = atob(testSTLData);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                addResult('✓ Base64 解码成功，字节数: ' + bytes.length, true);
+                
+                // 创建 Blob
+                const blob = new Blob([bytes], { type: 'application/octet-stream' });
+                
+                // 创建下载链接
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `test_model_${Date.now()}.stl`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                addResult('✓ 下载已触发，文件名为: ' + a.download, true);
+                addResult('注意：浏览器可能询问保存位置或自动下载', true);
+                
+            } catch (error) {
+                addResult('下载失败: ' + error.message, false);
+                console.error('错误详情:', error);
+            }
+        }
+        
+        // 页面加载时自动检查库
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                checkLibraries();
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

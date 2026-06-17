@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blender AI 建模助手</title>
+    <link rel="stylesheet" href="/static/style.css">
+    
+    <!-- Three.js 库 - 使用兼容的 CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+</head>
+<body>
+    <!-- 顶部导航栏 -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <span class="logo-icon">🎨</span>
+                <h1>Blender AI 建模助手</h1>
+            </div>
+            <div class="status-bar">
+                <div class="status-item" id="blenderStatus">
+                    <span class="status-dot" id="blenderDot"></span>
+                    <span id="blenderText">Blender: 连接中...</span>
+                </div>
+                <div class="status-item" id="aiStatus">
+                    <span class="status-dot" id="aiDot"></span>
+                    <span id="aiText">AI: 检测中...</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主容器 -->
+    <div class="container">
+        <!-- 左侧：模型展示区域 -->
+        <div class="left-panel">
+            <div class="panel-header">
+                <h2>📦 模型预览</h2>
+                <div class="panel-actions">
+                    <button class="btn-icon" id="loadBaseModel" title="加载基础模型">
+                        📁
+                    </button>
+                    <button class="btn-icon" id="refreshModel" title="刷新模型">
+                        🔄
+                    </button>
+                    <div class="export-dropdown">
+                        <button class="btn-icon btn-export" id="exportModelBtn" title="导出模型">
+                            💾
+                        </button>
+                        <select class="format-select" id="formatSelect" title="选择导出格式">
+                            <option value="stl" selected>STL (3D打印)</option>
+                            <option value="obj">OBJ (通用)</option>
+                            <option value="fbx">FBX (游戏)</option>
+                            <option value="gltf">glTF (Web)</option>
+                            <option value="glb">GLB (Web)</option>
+                            <option value="ply">PLY (点云)</option>
+                            <option value="x3d">X3D (Web3D)</option>
+                            <option value="dae">Collada (影视)</option>
+                            <option value="abc">Alembic (影视)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="model-viewer" id="modelViewer">
+                <!-- Three.js 3D 渲染器 -->
+                <canvas id="threeCanvas"></canvas>
+                
+                <!-- 加载提示 -->
+                <div class="viewer-placeholder" id="viewerPlaceholder">
+                    <div class="placeholder-icon">🎨</div>
+                    <h3>3D 模型预览</h3>
+                    <p class="placeholder-text">在右侧创建模型后，点击"🔄 刷新模型"加载 3D 预览</p>
+                    <div class="feature-list">
+                        <p>✨ <strong>支持功能：</strong></p>
+                        <ul>
+                            <li>🖱️ 鼠标拖动旋转模型</li>
+                            <li>🔍 滚轮缩放</li>
+                            <li>🎯 右键平移视角</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- 3D 查看器控制栏 -->
+                <div class="viewer-controls" id="viewerControls" style="display: none;">
+                    <button class="control-btn" id="resetView" title="重置视角">
+                        🎯 重置
+                    </button>
+                    <button class="control-btn" id="toggleWireframe" title="线框模式">
+                        🔲 线框
+                    </button>
+                    <button class="control-btn" id="downloadSTL" title="下载 STL">
+                        💾 下载
+                    </button>
+                </div>
+            </div>
+
+            <!-- 模型信息面板 -->
+            <div class="model-info">
+                <div class="info-item">
+                    <span class="info-label">场景对象：</span>
+                    <span class="info-value" id="objectCount">0</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">活动对象：</span>
+                    <span class="info-value" id="activeObject">无</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：对话区域 -->
+        <div class="right-panel">
+            <div class="panel-header">
+                <h2>💬 AI 对话</h2>
+                <button class="btn-icon" id="clearChat" title="清空对话">
+                    🗑️
+                </button>
+            </div>
+
+            <!-- 对话消息区域 -->
+            <div class="chat-messages" id="chatMessages">
+                <!-- 欢迎消息 -->
+                <div class="message assistant">
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-content">
+                        <div class="message-text">
+                            <h3>你好！我是 Blender AI 建模助手 👋</h3>
+                            <p>我可以帮你通过自然语言创建 3D 模型。建模结果会在你的 Blender 软件中实时显示。</p>
+                            
+                            <div class="examples-box">
+                                <p><strong>📝 试试这些指令：</strong></p>
+                                <ul>
+                                    <li>创建一个红色的立方体</li>
+                                    <li>在位置(2, 0, 0)创建一个蓝色球体</li>
+                                    <li>把当前对象移动到(5, 5, 5)</li>
+                                    <li>创建一个绿色的圆柱体，高度为3</li>
+                                    <li>删除所有物体</li>
+                                </ul>
+                            </div>
+
+                            <div class="tip-box">
+                                <p><strong>💡 提示：</strong></p>
+                                <p>• 确保 Blender 已启动并开启 MCP 服务器</p>
+                                <p>• 建模会在 Blender 中实时显示</p>
+                                <p>• 左侧模型预览功能正在开发中</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 输入区域 -->
+            <div class="chat-input-area">
+                <!-- 快捷指令按钮 -->
+                <div class="quick-actions">
+                    <button class="quick-btn" data-text="创建一个红色的立方体">
+                        🟥 红色立方体
+                    </button>
+                    <button class="quick-btn" data-text="创建一个蓝色的球体">
+                        🔵 蓝色球体
+                    </button>
+                    <button class="quick-btn" data-text="删除所有物体">
+                        🗑️ 清空场景
+                    </button>
+                    <button class="quick-btn" data-text="查看场景信息">
+                        📋 场景信息
+                    </button>
+                </div>
+
+                <!-- 输入框 -->
+                <div class="input-wrapper">
+                    <textarea 
+                        id="messageInput" 
+                        placeholder="在这里输入建模指令，例如：创建一个红色的球体..." 
+                        rows="2"
+                        maxlength="500"
+                    ></textarea>
+                    <button class="send-btn" id="sendBtn" disabled>
+                        <span class="btn-text">发送</span>
+                        <span class="btn-icon">📤</span>
+                    </button>
+                </div>
+
+                <!-- 字符计数 -->
+                <div class="input-info">
+                    <span class="char-count">
+                        <span id="charCount">0</span>/500
+                    </span>
+                    <span class="input-hint">
+                        按 Ctrl+Enter 快速发送
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载动画（全屏） -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <p class="loading-text" id="loadingText">连接中...</p>
+        <button class="cancel-btn" id="cancelLoadingBtn" style="display: none;">
+            ✕ 取消
+        </button>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div class="toast" id="toast"></div>
+
+    <!-- 导出格式选择对话框 (已弃用，改用下拉菜单) -->
+    <div class="modal-overlay" id="exportModal" style="display: none !important;">
+        <!-- 保留以备将来使用 -->
+    <div class="modal-overlay" id="exportModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>💾 导出模型</h3>
+                <button class="modal-close" onclick="closeExportModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">选择要导出的模型格式：</p>
+                <div class="format-grid">
+                    <button class="format-btn" data-format="stl" data-ext=".stl">
+                        <div class="format-icon">🔺</div>
+                        <div class="format-name">STL</div>
+                        <div class="format-desc">3D打印常用</div>
+                    </button>
+                    <button class="format-btn" data-format="obj" data-ext=".obj">
+                        <div class="format-icon">📦</div>
+                        <div class="format-name">OBJ</div>
+                        <div class="format-desc">通用格式</div>
+                    </button>
+                    <button class="format-btn" data-format="fbx" data-ext=".fbx">
+                        <div class="format-icon">🎮</div>
+                        <div class="format-name">FBX</div>
+                        <div class="format-desc">游戏和动画</div>
+                    </button>
+                    <button class="format-btn" data-format="gltf" data-ext=".gltf">
+                        <div class="format-icon">🌐</div>
+                        <div class="format-name">glTF</div>
+                        <div class="format-desc">Web3D标准</div>
+                    </button>
+                    <button class="format-btn" data-format="glb" data-ext=".glb">
+                        <div class="format-icon">🌐</div>
+                        <div class="format-name">GLB</div>
+                        <div class="format-desc">glTF二进制</div>
+                    </button>
+                    <button class="format-btn" data-format="ply" data-ext=".ply">
+                        <div class="format-icon">📊</div>
+                        <div class="format-name">PLY</div>
+                        <div class="format-desc">点云格式</div>
+                    </button>
+                    <button class="format-btn" data-format="x3d" data-ext=".x3d">
+                        <div class="format-icon">🔷</div>
+                        <div class="format-name">X3D</div>
+                        <div class="format-desc">Web3D</div>
+                    </button>
+                    <button class="format-btn" data-format="dae" data-ext=".dae">
+                        <div class="format-icon">🎬</div>
+                        <div class="format-name">Collada</div>
+                        <div class="format-desc">影视制作</div>
+                    </button>
+                    <button class="format-btn" data-format="abc" data-ext=".abc">
+                        <div class="format-icon">🎥</div>
+                        <div class="format-name">Alembic</div>
+                        <div class="format-desc">高级影视</div>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=4"></script>
+</body>
+</html>

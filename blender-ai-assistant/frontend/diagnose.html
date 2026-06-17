@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 查看器诊断</title>
+    <style>
+        body {
+            font-family: 'Consolas', monospace;
+            background: #1a1a2e;
+            color: #e2e8f0;
+            padding: 2rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #ff8c42;
+            border-bottom: 2px solid #ff8c42;
+            padding-bottom: 1rem;
+        }
+        .section {
+            background: #16213e;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            border-radius: 8px;
+            border-left: 4px solid #ff8c42;
+        }
+        .item {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .item:last-child {
+            border-bottom: none;
+        }
+        .label {
+            flex: 1;
+            color: #cbd5e1;
+        }
+        .status {
+            padding: 0.3rem 1rem;
+            border-radius: 4px;
+            font-weight: bold;
+            min-width: 80px;
+            text-align: center;
+        }
+        .ok {
+            background: #10b981;
+            color: white;
+        }
+        .error {
+            background: #ef4444;
+            color: white;
+        }
+        .button {
+            background: #ff8c42;
+            color: white;
+            border: none;
+            padding: 0.8rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin: 0.5rem;
+        }
+        .button:hover {
+            background: #ff7a2e;
+        }
+        pre {
+            background: #0d1117;
+            padding: 1rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            color: #58a6ff;
+        }
+        .log {
+            background: #0d1117;
+            padding: 1rem;
+            border-radius: 6px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 1rem;
+        }
+        .log-entry {
+            padding: 0.3rem 0;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 3D 查看器诊断工具</h1>
+    
+    <div class="section">
+        <h2>📦 依赖库检查</h2>
+        <div id="dependencies"></div>
+    </div>
+    
+    <div class="section">
+        <h2>🎨 Three.js 状态</h2>
+        <div id="threejs"></div>
+    </div>
+    
+    <div class="section">
+        <h2>🔌 WebSocket 状态</h2>
+        <div id="websocket"></div>
+    </div>
+    
+    <div class="section">
+        <h2>🧪 测试操作</h2>
+        <button class="button" onclick="testThreeJS()">测试 Three.js</button>
+        <button class="button" onclick="testSTLLoad()">测试 STL 加载</button>
+        <button class="button" onclick="testWebSocket()">测试 WebSocket</button>
+        <button class="button" onclick="runFullDiagnostics()">完整诊断</button>
+    </div>
+    
+    <div class="section">
+        <h2>📋 诊断日志</h2>
+        <div class="log" id="log"></div>
+    </div>
+
+    <!-- Three.js 库 - 使用兼容的 CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+
+    <script>
+        const log = [];
+        
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            log.push({ time: timestamp, message, type });
+            updateLogDisplay();
+        }
+        
+        function updateLogDisplay() {
+            const logDiv = document.getElementById('log');
+            logDiv.innerHTML = log.map(entry => {
+                const color = entry.type === 'error' ? '#ef4444' : 
+                             entry.type === 'success' ? '#10b981' : '#94a3b8';
+                return `<div class="log-entry" style="color: ${color}">[${entry.time}] ${entry.message}</div>`;
+            }).join('');
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function createStatusItem(label, isOk) {
+            return `
+                <div class="item">
+                    <span class="label">${label}</span>
+                    <span class="status ${isOk ? 'ok' : 'error'}">${isOk ? '✓ 正常' : '✗ 异常'}</span>
+                </div>
+            `;
+        }
+        
+        function checkDependencies() {
+            const deps = document.getElementById('dependencies');
+            let html = '';
+            
+            html += createStatusItem('Three.js 核心库', typeof THREE !== 'undefined');
+            html += createStatusItem('STLLoader', typeof THREE !== 'undefined' && THREE.STLLoader);
+            html += createStatusItem('OrbitControls', typeof THREE !== 'undefined' && THREE.OrbitControls);
+            
+            deps.innerHTML = html;
+            
+            addLog('依赖库检查完成');
+        }
+        
+        function checkThreeJS() {
+            const threejs = document.getElementById('threejs');
+            let html = '';
+            
+            // 检查全局变量
+            const hasScene = typeof scene !== 'undefined';
+            const hasCamera = typeof camera !== 'undefined';
+            const hasRenderer = typeof renderer !== 'undefined';
+            const hasControls = typeof controls !== 'undefined';
+            const hasCurrentMesh = typeof currentMesh !== 'undefined' && currentMesh !== null;
+            
+            html += createStatusItem('Scene 对象', hasScene);
+            html += createStatusItem('Camera 对象', hasCamera);
+            html += createStatusItem('Renderer 对象', hasRenderer);
+            html += createStatusItem('Controls 对象', hasControls);
+            html += createStatusItem('当前模型 (currentMesh)', hasCurrentMesh);
+            
+            if (hasCurrentMesh) {
+                html += `<div class="item"><span class="label">模型信息</span><span style="color: #10b981">顶点数: ${currentMesh.geometry.attributes.position.count}</span></div>`;
+            }
+            
+            threejs.innerHTML = html;
+            
+            addLog('Three.js 状态检查完成');
+        }
+        
+        function checkWebSocket() {
+            const websocket = document.getElementById('websocket');
+            let html = '';
+            
+            const hasWs = typeof ws !== 'undefined';
+            const isConnected = hasWs && ws.readyState === 1;
+            const hasSTLData = typeof currentSTLData !== 'undefined' && currentSTLData !== null;
+            
+            html += createStatusItem('WebSocket 对象', hasWs);
+            html += createStatusItem('连接状态', isConnected);
+            html += createStatusItem('STL 数据', hasSTLData);
+            
+            if (hasWs) {
+                const states = ['连接中', '已连接', '关闭中', '已关闭'];
+                html += `<div class="item"><span class="label">readyState</span><span>${states[ws.readyState] || '未知'}</span></div>`;
+            }
+            
+            if (hasSTLData) {
+                html += `<div class="item"><span class="label">数据大小</span><span style="color: #10b981">${currentSTLData.length} 字符</span></div>`;
+            }
+            
+            websocket.innerHTML = html;
+            
+            addLog('WebSocket 状态检查完成');
+        }
+        
+        function testThreeJS() {
+            addLog('开始测试 Three.js...', 'info');
+            
+            try {
+                // 创建测试场景
+                const testScene = new THREE.Scene();
+                const testCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+                const testRenderer = new THREE.WebGLRenderer();
+                
+                addLog('✓ Scene 创建成功', 'success');
+                addLog('✓ Camera 创建成功', 'success');
+                addLog('✓ Renderer 创建成功', 'success');
+                
+                // 创建测试几何体
+                const geometry = new THREE.BoxGeometry(1, 1, 1);
+                const material = new THREE.MeshBasicMaterial({ color: 0xff8c42 });
+                const cube = new THREE.Mesh(geometry, material);
+                testScene.add(cube);
+                
+                addLog('✓ 测试立方体创建成功', 'success');
+                addLog('Three.js 功能正常！', 'success');
+                
+            } catch (error) {
+                addLog('✗ Three.js 测试失败: ' + error.message, 'error');
+            }
+        }
+        
+        function testSTLLoad() {
+            addLog('开始测试 STL 加载...', 'info');
+            
+            try {
+                if (typeof THREE === 'undefined' || !THREE.STLLoader) {
+                    throw new Error('STLLoader 未加载');
+                }
+                
+                // 创建一个简单的三角形 STL（Base64）
+                const testSTL = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAANszMPgAAAAAAAIA/AACAPwAAgD8AAAAAAACAPwAAgD8AAIA/AACAPw==";
+                
+                // 解码
+                const binaryString = atob(testSTL);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                addLog('✓ Base64 解码成功', 'success');
+                
+                // 加载 STL
+                const loader = new THREE.STLLoader();
+                const geometry = loader.parse(bytes.buffer);
+                
+                addLog('✓ STL 解析成功', 'success');
+                addLog(`  顶点数: ${geometry.attributes.position.count}`, 'info');
+                
+                // 创建网格
+                const material = new THREE.MeshPhongMaterial({ color: 0xff8c42 });
+                const mesh = new THREE.Mesh(geometry, material);
+                
+                addLog('✓ Mesh 创建成功', 'success');
+                addLog('STL 加载功能正常！', 'success');
+                
+            } catch (error) {
+                addLog('✗ STL 加载测试失败: ' + error.message, 'error');
+            }
+        }
+        
+        function testWebSocket() {
+            addLog('开始测试 WebSocket...', 'info');
+            
+            try {
+                if (typeof ws === 'undefined') {
+                    throw new Error('WebSocket 对象不存在（页面可能未完全加载）');
+                }
+                
+                const states = ['连接中', '已连接', '关闭中', '已关闭'];
+                addLog(`WebSocket 状态: ${states[ws.readyState]}`, 'info');
+                
+                if (ws.readyState === 1) {
+                    addLog('✓ WebSocket 已连接', 'success');
+                    
+                    // 发送测试消息
+                    ws.send(JSON.stringify({ type: 'get_scene' }));
+                    addLog('✓ 发送测试消息成功', 'success');
+                } else {
+                    addLog('✗ WebSocket 未连接', 'error');
+                }
+                
+            } catch (error) {
+                addLog('✗ WebSocket 测试失败: ' + error.message, 'error');
+            }
+        }
+        
+        function runFullDiagnostics() {
+            log.length = 0;
+            addLog('=== 开始完整诊断 ===', 'info');
+            
+            checkDependencies();
+            checkThreeJS();
+            checkWebSocket();
+            
+            addLog('', 'info');
+            testThreeJS();
+            testSTLLoad();
+            testWebSocket();
+            
+            addLog('=== 诊断完成 ===', 'success');
+        }
+        
+        // 页面加载时自动运行
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                checkDependencies();
+                checkThreeJS();
+                checkWebSocket();
+                addLog('页面加载完成，自动诊断完成', 'success');
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

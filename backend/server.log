@@ -1,0 +1,121 @@
+D:\lixiangdownload\freecad-ai-assistant\backend\main_freecad_ai.py:47: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+[OK] 静态文件服务已启用: D:\lixiangdownload\freecad-ai-assistant\frontend
+INFO:     Started server process [23096]
+INFO:     Waiting for application startup.
+
+============================================================
+FreeCAD AI 助手后端启动
+============================================================
+
+[1/2] 连接 FreeCAD RPC 服务器...
+FreeCAD RPC 客户端初始化
+目标地址: localhost:9875
+提示: 请确保 FreeCAD 中已启动 RPC Server
+[OK] 已连接到 FreeCAD RPC 服务器
+   地址: localhost:9875
+[OK] FreeCAD 连接成功
+   文档列表: ['StoolDoc', 'Unnamed', 'Unnamed1']
+
+[2/2] 初始化 AI 代码生成引擎...
+[OK] AI 代理使用 DeepSeek-V4-Flash 模型
+[OK] AI 模式: 使用 DeepSeek-V4-Flash 模型
+   提供商: 阿里云百炼
+
+------------------------------------------------------------
+服务地址: http://localhost:8001
+WebSocket: ws://localhost:8001/ws
+健康检查: http://localhost:8001/health
+============================================================
+
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     ('127.0.0.1', 65161) - "WebSocket /ws" [accepted]
+[OK] 前端已连接
+INFO:     connection open
+[DEBUG] get_document_labels 返回: [{'name': 'StoolDoc', 'label': 'StoolDoc1'}, {'name': 'Unnamed', 'label': '1'}, {'name': 'Unnamed1', 'label': 'Unnamed1'}]
+[DEBUG] 获取文档 StoolDoc (Label: StoolDoc1) 的对象
+[DEBUG] 获取文档 Unnamed (Label: 1) 的对象
+[DEBUG] 获取文档 Unnamed1 (Label: Unnamed1) 的对象
+INFO:     127.0.0.1:56311 - "GET /health HTTP/1.1" 200 OK
+
+[用户] "创建一把椅子，坐面宽50深50厚3，靠背高30，腿高40"
+[OK] 代码执行成功
+  输出: 已创建椅子，坐面高度: 40mm，靠背高度: 73mm
+[OK] 代码执行成功
+[OK] 截图获取成功: (1510, 1092)
+
+[用户] 帮我把靠背高度调整为80
+[OK] 代码执行成功
+  输出: 已将靠背高度调整为 80mm
+[OK] 代码执行成功
+[OK] 截图获取成功: (1510, 1092)
+INFO:     127.0.0.1:52991 - "GET / HTTP/1.1" 200 OK
+[OK] 前端断开连接
+INFO:     connection closed
+INFO:     127.0.0.1:52991 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51511 - "GET /api/ai/status HTTP/1.1" 200 OK
+INFO:     ('127.0.0.1', 51027) - "WebSocket /ws" [accepted]
+[OK] 前端已连接
+INFO:     connection open
+[DEBUG] get_document_labels 返回: [{'name': 'StoolDoc', 'label': 'StoolDoc1'}, {'name': 'Unnamed', 'label': '1'}, {'name': 'Unnamed1', 'label': 'Unnamed1'}]
+[DEBUG] 获取文档 StoolDoc (Label: StoolDoc1) 的对象
+[DEBUG] 获取文档 Unnamed (Label: 1) 的对象
+[DEBUG] 获取文档 Unnamed1 (Label: Unnamed1) 的对象
+
+[用户] 创建一把椅子，坐面宽50深50厚3，靠背高30，腿高40
+[OK] 代码执行成功
+  输出: 已创建椅子，坐面高度: 40mm，靠背高度: 73mm
+[OK] 代码执行成功
+[OK] 截图获取成功: (1510, 1092)
+
+[用户] 创建一把椅子，坐面宽50深50厚3，靠背高30，腿高40"
+[OK] 代码执行成功
+  输出: 已创建椅子，坐面高度: 40mm，靠背高度: 73mm
+[OK] 代码执行成功
+[OK] 截图获取成功: (1510, 1092)
+
+[用户] 帮我把靠背高度调整为80
+[OK] 代码执行成功
+  输出: 已重新创建椅子，靠背高度调整为 80mm
+[OK] 代码执行成功
+[OK] 截图获取成功: (1510, 1092)
+
+[用户] 帮我新建一个文档，创建一张床
+[OK] 代码执行成功
+  输出: 已创建新文档“BedDoc”，并生成一张包含床板、床头板和四条床腿的简易床模型
+[OK] 代码执行成功
+[OK] 截图获取成功: (1510, 1092)
+
+[用户] 帮我创建一个新文档，创建一幢简约的小木屋
+[OK] 代码执行成功
+  输出: 已创建简约小木屋
+[OK] 代码执行成功
+[OK] 截图获取成功: (1510, 1092)
+[OK] 截图获取成功: (1510, 1092)
+[OK] 截图获取成功: (1510, 1092)
+[OK] 截图获取成功: (1510, 1092)
+INFO:     127.0.0.1:65395 - "GET / HTTP/1.1" 200 OK
+[OK] 前端断开连接
+INFO:     connection closed
+INFO:     127.0.0.1:55040 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60658 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60658 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50473 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58341 - "GET / HTTP/1.1" 200 OK
