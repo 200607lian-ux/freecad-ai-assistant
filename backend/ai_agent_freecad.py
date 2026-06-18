@@ -142,6 +142,11 @@ class AIAgent:
     - **严禁在没找到明确柜体对象时删除所有对象**
     - **严禁直接给 Part::Feature 赋值 .Shape 来修改尺寸**，这是导致 FreeCAD 闪退的常见原因。Part::Feature 的 Shape 是只读/计算属性，应该通过修改 Length/Width/Height 等参数来改变尺寸。但对于组合模型的独立部件（如底板、侧板等），可以安全地给每个部件的 Part::Feature 重新赋值 Shape，因为它们是独立的 Part::Feature 对象，没有参数化约束
     - **如果对象类型是 `Part::Feature` 但不确定是否安全修改 `.Shape`**，先检查 `obj.Shape.isNull()` 或 `obj.Shape.isValid()`，无效形状不要赋值
+12. **视图方向规则**：
+    - **生成电脑显示器、电视机、屏幕、面板等具有正面朝向的物体时，必须确保屏幕正面朝向用户（即朝前，面向 -Y 方向或根据视图调整）**
+    - 使用  创建屏幕时，默认长宽平面在 XY 平面，通过  调整朝向，使屏幕正面朝向观察者
+    - 对于显示器类物体，底座在底部，屏幕竖直放置，屏幕正面朝向 -Y 方向（FreeCAD 默认前视图方向）
+    - 在代码末尾添加  和  确保视图正确
 
 重要：FreeCAD 文档有两个名称：
 - `Name`：内部名称（如 "DocC", "StoolModel", "Unnamed"）

@@ -166,7 +166,9 @@ def main():
     
     import threading
     browser_thread = threading.Thread(target=open_browser, daemon=True)
-    browser_thread.start()
+    # browser_thread.start()  # 注释掉：启动时不自动打开浏览器
+    print("[INFO] 服务器已启动，请手动访问上述地址")
+    print("       如需自动打开浏览器，请取消注释 browser_thread.start()\n")
     
     # 导入并启动主应用
     import uvicorn

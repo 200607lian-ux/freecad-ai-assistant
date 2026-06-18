@@ -248,8 +248,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 await handle_export(websocket, message)
                 
             elif msg_type == "export_stl":
-                # 导出 STL 用于 3D 预览
-                await handle_export(websocket, {"format": "stl"})
+                # 导出 STL 用于 3D 预览（不触发下载）
+                await handle_export(websocket, {"format": "stl", "preview": True})
                 
             elif msg_type == "create_object":
                 # 直接创建对象
@@ -288,8 +288,8 @@ async def handle_ai_chat(websocket: WebSocket, user_input: str, conversation_his
         explanation = ai_response.get("explanation", "")
         
         if response_type == "code" and code_to_execute:
-            # 发送生成的代码
-            await websocket.send_json({"type": "code", "content": code_to_execute})
+            # 将生成的代码输出到后端日志，不发送到前端
+            print(f"[CODE] AI 生成的代码:\n{code_to_execute}")
             
             # 执行代码前确保 FreeCAD 已连接
             if not await ensure_freecad_connection():
@@ -305,7 +305,7 @@ async def handle_ai_chat(websocket: WebSocket, user_input: str, conversation_his
                 loop = asyncio.get_event_loop()
                 result = await asyncio.wait_for(
                     loop.run_in_executor(None, freecad.execute_code, code_to_execute),
-                    timeout=60
+                    timeout=120
                 )
                 
                 if result.get("success"):
@@ -334,11 +334,106 @@ async def handle_ai_chat(websocket: WebSocket, user_input: str, conversation_his
                     except Exception as e:
                         print(f"[WARN] 截图失败: {e}")
                     
-                    # 发送成功响应
+                    # 代码执行成功后，自动导出 STL 用于 3D 预览
+                    try:
+                        await websocket.send_json({"type": "status", "content": "正在导出 3D 模型..."})
+                        # 使用 export_document 导出 STL，然后读取文件发送给前端
+                        import tempfile
+                        import time
+                        import os
+                        import base64
+                        
+                        timestamp = int(time.time())
+                        export_path = os.path.join(tempfile.gettempdir(), f"freecad_preview_{timestamp}.stl")
+                        
+                        # 获取当前活动文档名称
+                        doc_result = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                None,
+                                lambda: freecad.execute_code("""
+import FreeCAD
+doc = FreeCAD.ActiveDocument
+if doc:
+    print(doc.Name)
+else:
+    print("")
+""")
+                            ),
+                            timeout=10
+                        )
+                        
+                        doc_name = None
+                        if doc_result and doc_result.get("success"):
+                            output = doc_result.get("message", "").strip()
+                            if "Output:" in output:
+                                output = output.split("Output:")[-1].strip()
+                            doc_name = output if output else None
+                        
+                        if not doc_name:
+                            docs = await asyncio.wait_for(
+                                loop.run_in_executor(None, freecad.list_documents),
+                                timeout=10
+                            )
+                            if docs:
+                                doc_name = docs[-1]
+                        
+                        if doc_name:
+                            export_result = await asyncio.wait_for(
+                                loop.run_in_executor(
+                                    None,
+                                    lambda: freecad.export_document(doc_name, export_path, "stl")
+                                ),
+                                timeout=30
+                            )
+                            
+                            print(f"[DEBUG] export_result type: {type(export_result)}, value: {export_result}")
+                            
+                            # export_document 返回的是执行结果字典，不是文件路径
+                            # 检查输出中是否包含成功标记
+                            export_success = False
+                            if isinstance(export_result, dict):
+                                if export_result.get("success"):
+                                    export_success = True
+                                else:
+                                    # 检查 message 中是否有成功标记
+                                    msg = export_result.get("message", "")
+                                    if "[OK] 已导出 STL" in msg or "导出完成" in msg:
+                                        export_success = True
+                            elif isinstance(export_result, str):
+                                if "[OK] 已导出 STL" in export_result or "导出完成" in export_result:
+                                    export_success = True
+                            
+                            if export_success and os.path.exists(export_path):
+                                # 读取文件并编码为 base64
+                                with open(export_path, 'rb') as f:
+                                    file_data = f.read()
+                                file_b64 = base64.b64encode(file_data).decode()
+                                
+                                print(f"[DEBUG] STL 文件大小: {len(file_data)} bytes, base64: {len(file_b64)} chars")
+                                
+                                await websocket.send_json({
+                                    "type": "stl_exported",
+                                    "content": file_b64
+                                })
+                                
+                                print(f"[DEBUG] stl_exported 消息已发送")
+                                
+                                # 清理临时文件
+                                try:
+                                    os.remove(export_path)
+                                except:
+                                    pass
+                            else:
+                                print(f"[WARN] STL 导出未成功或文件不存在: export_result={export_result}, path_exists={os.path.exists(export_path) if 'export_path' in locals() else 'N/A'}")
+                    except Exception as e:
+                        print(f"[WARN] STL 导出失败: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    
+                    # 发送成功响应（不包含代码）
                     await websocket.send_json({
                         "type": "response",
                         "content": response_message,
-                        "code": code_to_execute,
                         "explanation": explanation,
                         "output": result.get("message", "")[:500]
                     })
@@ -347,8 +442,7 @@ async def handle_ai_chat(websocket: WebSocket, user_input: str, conversation_his
                     print(f"[FAIL] 代码执行失败: {error_msg}")
                     await websocket.send_json({
                         "type": "error",
-                        "content": f"执行失败: {error_msg}",
-                        "code": code_to_execute
+                        "content": f"执行失败: {error_msg}"
                     })
                     
             except asyncio.TimeoutError:
@@ -649,7 +743,7 @@ async def handle_export(websocket: WebSocket, message: dict):
         
         loop = asyncio.get_event_loop()
         
-        # 获取活动文档名称
+        # 获取活动文档名称并检查是否有对象
         docs = await asyncio.wait_for(
             loop.run_in_executor(None, freecad.list_documents),
             timeout=10
@@ -663,7 +757,7 @@ async def handle_export(websocket: WebSocket, message: dict):
             })
             return
         
-        # 获取当前活动文档（而不是第一个文档）
+        # 获取当前活动文档并检查是否有对象
         active_doc_result = await asyncio.wait_for(
             loop.run_in_executor(
                 None,
@@ -671,25 +765,41 @@ async def handle_export(websocket: WebSocket, message: dict):
 import FreeCAD
 doc = FreeCAD.ActiveDocument
 if doc:
-    print(doc.Name)
+    obj_count = len(doc.Objects)
+    print(f"DOC_NAME={doc.Name}")
+    print(f"OBJ_COUNT={obj_count}")
 else:
-    print("")
+    print("DOC_NAME=")
+    print("OBJ_COUNT=0")
 """)
             ),
-            timeout=10
+            timeout=30
         )
         
         doc_name = None
+        obj_count = 0
         if active_doc_result.get("success"):
             output = active_doc_result.get("message", "").strip()
-            # 从输出中提取文档名（可能在 "Output:" 后面）
-            if "Output:" in output:
-                output = output.split("Output:")[-1].strip()
-            if output in docs:
-                doc_name = output
+            for line in output.split("\n"):
+                if line.startswith("DOC_NAME="):
+                    doc_name = line.split("=", 1)[1].strip()
+                elif line.startswith("OBJ_COUNT="):
+                    try:
+                        obj_count = int(line.split("=", 1)[1].strip())
+                    except ValueError:
+                        obj_count = 0
         
-        if not doc_name:
-            doc_name = docs[-1]  # 如果没有活动文档，使用最后一个文档（通常是最新打开的）
+        if not doc_name or doc_name not in docs:
+            doc_name = docs[-1]
+        
+        # 检查活动文档中是否有对象
+        if obj_count == 0:
+            await websocket.send_json({
+                "type": "export",
+                "success": False,
+                "error": "没有活动文档"
+            })
+            return
         
         ext = format_extensions[export_format]
         
@@ -705,7 +815,7 @@ else:
                 None, 
                 lambda: freecad.export_document(doc_name, export_path, export_format)
             ),
-            timeout=60
+            timeout=120
         )
         
         if result.get("success"):
@@ -730,15 +840,20 @@ else:
                 
                 file_b64 = base64.b64encode(file_data).decode()
                 
-                await websocket.send_json({
-                    "type": "export",
-                    "success": True,
-                    "format": export_format,
-                    "filename": f"freecad_export_{timestamp}{ext}",
-                    "content": file_b64,
-                    "is_base64": True,
-                    "mime_type": get_mime_type(export_format)
-                })
+                # 检查是否是预览请求（通过消息中的 preview 字段判断）
+                is_preview = message.get("preview", False)
+                
+                if not is_preview:
+                    # 只有非预览请求才发送 export 消息（触发下载）
+                    await websocket.send_json({
+                        "type": "export",
+                        "success": True,
+                        "format": export_format,
+                        "filename": f"freecad_export_{timestamp}{ext}",
+                        "content": file_b64,
+                        "is_base64": True,
+                        "mime_type": get_mime_type(export_format)
+                    })
                 
                 # 如果是 STL 格式，额外发送 stl_exported 消息用于 3D 预览
                 if export_format == "stl":

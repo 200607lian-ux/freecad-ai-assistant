@@ -57,9 +57,9 @@
             directionalLight2.position.set(-5, 3, -5);
             scene.add(directionalLight2);
             
-            // 添加坐标轴
-            const axesHelper = new THREE.AxesHelper(3);
-            scene.add(axesHelper);
+            // 添加坐标轴（已注释掉，不显示）
+            // const axesHelper = new THREE.AxesHelper(3);
+            // scene.add(axesHelper);
             
             // 窗口大小改变时调整
             window.addEventListener('resize', onWindowResize, false);
@@ -104,6 +104,8 @@
             
             setModelLoading(true);
             
+            // 使用 requestIdleCallback 或 setTimeout 让 UI 先更新加载状态
+            const loadTask = () => {
             try {
                 // 隐藏占位符
                 const placeholder = document.getElementById('viewerPlaceholder');
@@ -117,10 +119,11 @@
                     viewerControls.style.display = 'flex';
                 }
                 
-                // 解码 Base64
+                // 解码 Base64 - 使用更高效的方式
                 const binaryString = atob(base64Data);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
                     bytes[i] = binaryString.charCodeAt(i);
                 }
                 
@@ -142,6 +145,11 @@
                     currentMesh.material.dispose();
                 }
                 
+                // 自动调整相机位置（提前计算尺寸）
+                const modelSize = new THREE.Vector3();
+                geometry.boundingBox.getSize(modelSize);
+                const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
+                
                 // 创建材质（橙色金属效果）
                 const material = new THREE.MeshPhongMaterial({
                     color: 0xff8c42,
@@ -155,18 +163,16 @@
                 // 创建网格
                 currentMesh = new THREE.Mesh(geometry, material);
                 
-                // 居中模型
+                // 居中模型并上移
                 const center = new THREE.Vector3();
                 geometry.boundingBox.getCenter(center);
                 currentMesh.position.sub(center);
+                currentMesh.position.y += maxDim * 0.15; // 向上移动模型
                 
                 // 添加到场景
                 scene.add(currentMesh);
                 
                 // 自动调整相机位置
-                const modelSize = new THREE.Vector3();
-                geometry.boundingBox.getSize(modelSize);
-                const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
                 const fov = camera.fov * (Math.PI / 180);
                 let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
                 cameraZ *= 2.5;
@@ -191,6 +197,14 @@
                 console.error('STL 加载失败:', error);
                 setModelLoading(false);
                 addMessage('error', '3D 模型加载失败: ' + error.message);
+            }
+            };
+            
+            // 使用 setTimeout 让浏览器先渲染加载动画
+            if (window.requestIdleCallback) {
+                requestIdleCallback(loadTask, { timeout: 100 });
+            } else {
+                setTimeout(loadTask, 50);
             }
         }
         

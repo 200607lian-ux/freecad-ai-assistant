@@ -582,7 +582,7 @@
             
             <div class="preview-content">
                 <div class="model-viewer-container" id="modelViewer">
-                    <div class="viewer-placeholder" id="viewerPlaceholder">等待 FreeCAD 连接...</div>
+                    <div class="viewer-placeholder" id="viewerPlaceholder">暂无模型</div>
                     <canvas id="threeCanvas"></canvas>
                     <div class="viewer-controls" id="viewerControls">
                         <button class="viewer-btn" onclick="toggleWireframe()">线框</button>
@@ -716,17 +716,15 @@
                     
                 case 'response':
                     addMessage('ai', msg.content);
-                    // 先生成代码块，再显示执行输出
-                    if (msg.code) {
-                        addCodeBlock(msg.code);
-                    }
+                    // 仅显示执行输出，不再显示代码块
                     if (msg.output) {
                         addOutput(msg.output);
                     }
                     break;
                     
                 case 'code':
-                    addCodeBlock(msg.content);
+                    // 代码不再显示在前端，仅记录到控制台
+                    console.log('[CODE] 后端生成的代码:', msg.content);
                     break;
                     
                 case 'code_executed':
@@ -878,7 +876,13 @@
                     addMessage('system', `[OK] 导出成功: ${msg.filename}`);
                 }
             } else {
-                addMessage('error', `[FAIL] 导出失败: ${msg.error || '未知错误'}`);
+                // 导出失败，检查是否是文档为空的情况
+                setModelLoading(false); // 停止加载动画
+                if (msg.error === '没有活动文档') {
+                    addMessage('error', '暂无模型');
+                } else {
+                    addMessage('error', `[FAIL] 导出失败: ${msg.error || '未知错误'}`);
+                }
             }
         }
         
@@ -981,19 +985,9 @@
             container.scrollTop = container.scrollHeight;
         }
         
-        // 添加代码块
+        // 添加代码块（已废弃，代码不再显示在前端）
         function addCodeBlock(code) {
-            const container = document.getElementById('chatMessages');
-            const div = document.createElement('div');
-            div.className = 'message ai';
-            div.innerHTML = `
-                <div class="message-header">生成的代码</div>
-                <div class="code-block">
-                    <pre>${escapeHtml(code)}</pre>
-                </div>
-            `;
-            container.appendChild(div);
-            container.scrollTop = container.scrollHeight;
+            console.log('[CODE] 代码块（已隐藏）:', code);
         }
         
         // 添加输出信息
@@ -1154,9 +1148,10 @@
             directionalLight2.position.set(-5, 3, -5);
             scene.add(directionalLight2);
             
-            // 添加坐标轴
-            const axesHelper = new THREE.AxesHelper(3);
-            scene.add(axesHelper);
+            // 添加坐标轴（已禁用）
+            // const axesHelper = new THREE.AxesHelper(3);
+            // axesHelper.position.set(0, 2, 0);
+            // scene.add(axesHelper);
             
             // 窗口大小改变时调整
             window.addEventListener('resize', onWindowResize, false);
@@ -1232,6 +1227,17 @@
                 // 重新计算几何体
                 geometry.computeBoundingBox();
                 
+                // 统一缩放到标准尺寸（确保模型能完整显示）
+                const modelSize = new THREE.Vector3();
+                geometry.boundingBox.getSize(modelSize);
+                const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
+                const targetSize = 10;  // 目标显示尺寸
+                const scale = targetSize / maxDim;
+                geometry.scale(scale, scale, scale);
+                
+                // 重新计算包围盒（缩放后）
+                geometry.computeBoundingBox();
+                
                 // 移除旧模型
                 if (currentMesh) {
                     scene.remove(currentMesh);
@@ -1252,21 +1258,22 @@
                 // 创建网格
                 currentMesh = new THREE.Mesh(geometry, material);
                 
-                // 居中模型
+                // 居中模型并稍微上移，使其在视图中更居中显示
                 const center = new THREE.Vector3();
                 geometry.boundingBox.getCenter(center);
                 currentMesh.position.sub(center);
+                currentMesh.position.y += 2;  // 向上移动2个单位，让模型在视图中更靠上
                 
                 // 添加到场景
                 scene.add(currentMesh);
                 
-                // 自动调整相机位置
-                const modelSize = new THREE.Vector3();
-                geometry.boundingBox.getSize(modelSize);
-                const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
+                // 自动调整相机位置（基于缩放后的尺寸）
+                const scaledSize = new THREE.Vector3();
+                geometry.boundingBox.getSize(scaledSize);
+                const scaledMaxDim = Math.max(scaledSize.x, scaledSize.y, scaledSize.z);
                 const fov = camera.fov * (Math.PI / 180);
-                let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-                cameraZ *= 2.5;
+                let cameraZ = Math.abs(scaledMaxDim / 2 / Math.tan(fov / 2));
+                cameraZ *= 3.0;  // 留更多空间确保完整显示
                 
                 camera.position.set(cameraZ, cameraZ * 0.8, cameraZ);
                 camera.lookAt(0, 0, 0);
@@ -1307,7 +1314,7 @@
                 const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
                 const fov = camera.fov * (Math.PI / 180);
                 let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-                cameraZ *= 2.5;
+                cameraZ *= 3.0;
                 
                 camera.position.set(cameraZ, cameraZ * 0.8, cameraZ);
                 camera.lookAt(0, 0, 0);
