@@ -81,15 +81,82 @@ freecad-ai-assistant/
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 核心五步技术实现
+### 2.2 核心五步技术实现（按项目制作顺序）
 
-#### Step 1 — 自然语言意图解析（AI Agent）
+#### Step 1 — 搭建基础通信链路（FreeCAD ↔ 后端）
 
 **技术要点**：
-- **模型**：阿里云百炼 DeepSeek-V4-Flash（通过 DashScope OpenAI 兼容接口调用）
-- **温度参数**：`temperature=0.3`（低随机性，确保代码生成确定性）
+- **通信协议选型**：XML-RPC（主用）/ Socket（备用）
+- **FreeCAD 宏开发**：`freecad_rpc_server.FCMacro` 在 FreeCAD 内部启动 XML-RPC 服务器，监听 127.0.0.1:9877
+- **Python 客户端封装**：`freecad_rpc_client.py` 封装 `execute_code()`、`export_document()`、`get_screenshot()` 等原子操作
+- **连接健康检查**：`health_check()` + `ping()` 确保链路可用
+
+**关键代码片段**：
+```python
+# backend/freecad_rpc_client.py
+class FreeCADRPCClient:
+    def __init__(self):
+        self.host = '127.0.0.1'
+        self.port = 9877
+        self.connected = False
+    
+    def connect(self) -> bool:
+        result = self._get_server().ping()
+        if result:
+            self.connected = True
+            print(f"[OK] 已连接到 FreeCAD RPC 服务器")
+        return self.connected
+    
+    def execute_code(self, code: str) -> Dict[str, Any]:
+        # 在 FreeCAD GUI 线程同步执行 Python 代码
+        result = self._get_server().execute_code(code)
+        return result
+```
+
+**制作顺序意义**：这是整个项目的地基。没有稳定的通信链路，后续 AI 生成代码无法执行，3D 预览也无数据源。
+
+---
+
+#### Step 2 — 构建 WebSocket 实时通信框架（前端 ↔ 后端）
+
+**技术要点**：
+- **FastAPI WebSocket**：`@app.websocket("/ws")` 建立持久连接，支持全双工通信
+- **消息类型系统**：定义 `chat`/`status`/`response`/`code`/`stl_exported`/`export`/`error`/`scene_info` 等消息类型
+- **状态广播机制**：后端主动推送「AI 思考中...」「FreeCAD 执行中...」等状态，前端实时更新 UI
+- **自动重连**：前端断开 5 秒后自动尝试重连，最多 5 次
+
+**关键代码片段**：
+```python
+# backend/main_freecad_ai.py
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    conversation_history = []
+    
+    while True:
+        data = await websocket.receive_text()
+        message = json.loads(data)
+        msg_type = message.get("type", "")
+        
+        if msg_type == "chat":
+            await handle_ai_chat(websocket, user_input, conversation_history)
+        elif msg_type == "export":
+            await handle_export(websocket, message)
+        elif msg_type == "export_stl":
+            await handle_export(websocket, {"format": "stl", "preview": True})
+```
+
+**制作顺序意义**：建立前后端实时通道，为后续 AI 对话和 3D 预览推送提供基础设施。
+
+---
+
+#### Step 3 — 集成 AI 大模型实现自然语言到代码的转换（AI Agent）
+
+**技术要点**：
+- **模型选型**：阿里云百炼 DeepSeek-V4-Flash（通过 DashScope OpenAI 兼容接口调用）
 - **系统提示词工程**：560+ 行中文提示词，包含 12 条硬规则（安全约束、API 规范、视图方向）
 - **少样本学习（Few-shot）**：13 个完整输入/输出示例覆盖常见场景
+- **温度参数**：`temperature=0.3`（低随机性，确保代码生成确定性）
 
 **关键代码片段**：
 ```python
@@ -105,95 +172,107 @@ completion = self.client.chat.completions.create(
 )
 ```
 
-**输出格式**：纯 Python 代码，无解释文字，可直接注入 FreeCAD 控制台执行。
+**制作顺序意义**：在通信链路稳定后，引入 AI 作为「翻译器」，将用户自然语言转化为 FreeCAD 可执行的 Python 代码，这是项目的核心价值所在。
 
 ---
 
-#### Step 2 — 异步代码执行与超时管控（FreeCAD RPC）
+#### Step 4 — 异步代码执行与导出调度（后端执行引擎）
 
 **技术要点**：
 - **线程隔离**：`asyncio.run_in_executor()` 将同步 RPC 调用放入线程池，避免阻塞 WebSocket 主循环
 - **双层超时**：后端 `asyncio.wait_for(timeout=120s)` + FreeCAD 内部 GUI dispatch 超时 90s
-- **重连机制**：连接异常时自动尝试重连一次，失败则返回结构化错误
+- **智能导出调度**：代码执行成功后自动触发 STL 导出，读取临时文件 → Base64 编码 → WebSocket 推送
+- **空文档防护**：导出前检测 `FreeCAD.ActiveDocument.Objects` 数量，为空则立即返回错误
 
 **关键代码片段**：
 ```python
 # backend/main_freecad_ai.py
+# 1. 异步执行 AI 生成的代码
 loop = asyncio.get_event_loop()
 result = await asyncio.wait_for(
     loop.run_in_executor(None, freecad.execute_code, code_to_execute),
-    timeout=120  # 覆盖复杂模型创建场景
+    timeout=120
 )
+
+# 2. 执行成功后自动导出 STL
+if result.get("success"):
+    export_result = await asyncio.wait_for(
+        loop.run_in_executor(
+            None,
+            lambda: freecad.export_document(doc_name, export_path, "stl")
+        ),
+        timeout=120
+    )
+    
+    # 读取文件并推送到前端
+    with open(export_path, 'rb') as f:
+        file_data = f.read()
+    file_b64 = base64.b64encode(file_data).decode()
+    
+    await websocket.send_json({
+        "type": "stl_exported",
+        "content": file_b64
+    })
 ```
+
+**制作顺序意义**：将 AI 生成的代码「落地执行」，并把执行结果（3D 模型数据）回传给前端，完成闭环。
 
 ---
 
-#### Step 3 — 坐标系转换与 3D 实时渲染（Three.js）
+#### Step 5 — 浏览器端 3D 实时渲染与交互（Three.js 前端）
 
 **技术要点**：
-- **坐标系差异**：FreeCAD 使用 Z-up（Z 轴向上），Three.js 使用 Y-up（Y 轴向上）
-- **旋转变换**：`geometry.rotateX(-Math.PI / 2)` 实现 Z→Y 坐标系对齐
+- **坐标系转换**：FreeCAD Z-up → Three.js Y-up，通过 `geometry.rotateX(-Math.PI / 2)` 实现
+- **异步加载优化**：`requestIdleCallback` 延迟 STL 解析，优先渲染加载动画，提升感知速度
 - **自动布局**：计算 bounding box 后居中，并沿 Y 轴上移 15% 模型高度，避免贴底
-- **异步加载优化**：`requestIdleCallback` 或 `setTimeout` 延迟 STL 解析，优先渲染加载动画
+- **交互控制**：OrbitControls 支持旋转/缩放/平移，线框模式切换，视角重置
 
 **关键代码片段**：
 ```javascript
 // frontend/threejs_viewer.js
-let geometry = loader.parse(bytes.buffer);
-geometry.rotateX(-Math.PI / 2);  // Z-up → Y-up
-
-const center = new THREE.Vector3();
-geometry.boundingBox.getCenter(center);
-currentMesh.position.sub(center);
-currentMesh.position.y += maxDim * 0.15;  // 上移展示
+function loadSTLFromBase64(base64Data) {
+    setModelLoading(true);
+    
+    const loadTask = () => {
+        // 1. 解码 Base64
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        // 2. 解析 STL
+        const loader = new THREE.STLLoader();
+        let geometry = loader.parse(bytes.buffer);
+        
+        // 3. 坐标系转换（Z-up → Y-up）
+        geometry.rotateX(-Math.PI / 2);
+        
+        // 4. 创建材质和网格
+        const material = new THREE.MeshPhongMaterial({
+            color: 0xff8c42,
+            specular: 0x444444,
+            shininess: 100
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        
+        // 5. 居中并上移
+        const center = new THREE.Vector3();
+        geometry.boundingBox.getCenter(center);
+        mesh.position.sub(center);
+        mesh.position.y += maxDim * 0.15;
+        
+        // 6. 添加到场景
+        scene.add(mesh);
+        setModelLoading(false);
+    };
+    
+    // 异步执行，让 UI 先渲染加载动画
+    requestIdleCallback(loadTask, { timeout: 100 });
+}
 ```
 
----
-
-#### Step 4 — 智能导出调度与空文档防护（Export Scheduler）
-
-**技术要点**：
-- **前置检测**：导出前查询 `FreeCAD.ActiveDocument` 对象数量，为空则立即返回错误，避免无效计算
-- **格式映射**：`step`/`stl`/`obj`/`iges`/`brep`/`csv` → 统一调用 `export_document()`，内部自动路由
-- **临时文件管理**：`tempfile.gettempdir()` + 时间戳命名，导出后读取 → Base64 编码 → 删除，零残留
-- **预览与下载分离**：`preview=True` 时仅发送 `stl_exported` 消息（不触发浏览器下载）
-
-**关键代码片段**：
-```python
-# backend/main_freecad_ai.py → handle_export()
-if obj_count == 0:
-    await websocket.send_json({
-        "type": "export",
-        "success": False,
-        "error": "没有活动文档"
-    })
-    return
-```
-
----
-
-#### Step 5 — WebSocket 状态机与消息路由（State Machine）
-
-**技术要点**：
-- **状态广播**：`status` 类型消息实时推送「AI 思考中...」「FreeCAD 执行中...」「正在导出...」
-- **消息类型系统**：`chat`/`response`/`code`/`stl_exported`/`export`/`error`/`scene_info` 严格分离
-- **前端状态同步**：`setModelLoading(true/false)` 控制加载动画，避免死转圈
-- **错误降级**：截图失败不阻断主流程，导出失败仍返回 AI 执行结果
-
-**关键代码片段**：
-```javascript
-// frontend/index.html → handleMessage()
-case 'stl_exported':
-    if (msg.content) {
-        loadSTLFromBase64(msg.content);  // 异步加载 3D 模型
-    }
-    break;
-
-case 'error':
-    setModelLoading(false);  // 关键：停止加载动画
-    addMessage('error', msg.content);
-    break;
-```
+**制作顺序意义**：作为项目的「门面」，3D 预览是用户直接感知价值的环节。放在最后制作，是因为需要前面所有步骤（通信、AI、执行、导出）都就绪后，才有数据源可供展示。
 
 ---
 
